@@ -1,0 +1,72 @@
+[package]
+name = "blackwraith"
+version = "2.0.0-apotheosis"
+edition = "2024"
+authors = ["KingGekko"]
+license = "MIT"
+description = "Autonomous adversarial reasoning engine – Temporal Manifolds, RF fingerprinting, Hypervisor escape mapping, AI infrastructure attacks"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+debug = false
+strip = "symbols"
+
+[features]
+default = ["l3_tcpip", "l7_web", "evasion"]
+full = [
+    "l1_rf", "l2_arp", "l3_tcpip", "l7_web", "l7_ai", "l7_cloud",
+    "hypervisor", "iot", "ad", "evasion", "exfiltration",
+    "adversarial_breach", "adversarial_exploit", "adversarial_web", "adversarial_extreme"
+]
+l1_rf = ["dep:num-complex", "dep:ndarray", "dep:rustfft"]
+l2_arp = ["dep:pnet", "dep:pnet_packet", "dep:pnet_datalink"]
+l3_tcpip = []
+l7_web = ["dep:reqwest", "dep:select", "dep:kuchiki", "dep:urlencoding"]
+l7_ai = []
+l7_cloud = ["dep:reqwest"]
+hypervisor = []
+iot = []
+ad = []
+evasion = []
+exfiltration = []
+adversarial_breach = []
+adversarial_exploit = []
+adversarial_web = []
+adversarial_extreme = []
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+futures = "0.3"
+arc-swap = "1.6"
+lazy_static = "1.4"
+regex = "1.10"
+async-recursion = "1.0"
+tokio-stream = "0.1"
+chrono = "0.4"
+rand = "0.8"
+thiserror = "1.0"
+
+# Networking
+pnet = { version = "0.34", optional = true }
+pnet_packet = { version = "0.34", optional = true }
+pnet_datalink = { version = "0.34", optional = true }
+tokio-socks = "0.5"
+
+# HTTP / Web
+reqwest = { version = "0.11", features = ["json", "stream", "socks"], optional = true }
+select = { version = "0.6", optional = true }
+kuchiki = { version = "0.8", optional = true }
+urlencoding = { version = "2.1", optional = true }
+
+# AI / Numerics
+ndarray = { version = "0.15", optional = true }
+num-complex = { version = "0.4", optional = true }
+
+# RF / Signal processing
+rustfft = { version = "6.1", optional = true }

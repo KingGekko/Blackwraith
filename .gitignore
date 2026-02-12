@@ -1,0 +1,6 @@
+/target
+/dist
+/blackwraith_release
+**/*.rs.bk
+Cargo.lock
+.env
