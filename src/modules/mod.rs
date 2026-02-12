@@ -28,6 +28,7 @@ pub mod evasion;
 pub mod exfiltration;
 
 pub mod adversarial;
+pub mod ai_analysis;
 
 /// Unified output type for all scan modules
 pub enum ModuleOutput {

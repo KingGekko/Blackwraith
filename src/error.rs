@@ -30,6 +30,10 @@ pub enum BlackWraithError {
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("Task join error: {0}")]
     Join(#[from] tokio::task::JoinError),
+    #[error("Regex error: {0}")]
+    Regex(#[from] regex::Error),
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 pub type Result<T> = std::result::Result<T, BlackWraithError>;

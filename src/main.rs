@@ -24,7 +24,6 @@ const BANNER: &str = r#"
 const DISCLAIMER: &str = "\x1b[33m⚠  AUTHORISED USE ONLY — Use exclusively on systems you own or have written permission to test.\x1b[0m";
 
 fn print_banner() {
-    // Cyan banner
     eprintln!("\x1b[36m{}\x1b[0m", BANNER);
     eprintln!("  \x1b[1;37mv2.0 Apotheosis\x1b[0m  \x1b[90m│  Memory-safe async reconnaissance engine\x1b[0m");
     eprintln!("  \x1b[90m─────────────────┴────────────────────────────────────────\x1b[0m");
@@ -76,9 +75,25 @@ struct Cli {
     #[arg(long, global = true)]
     proxy: Option<String>,
 
+    /// Timeout for network operations in milliseconds
+    #[arg(long, global = true, default_value_t = 3000)]
+    timeout: u64,
+
     /// Predict attack chains (slow, uses AI)
     #[arg(long, global = true)]
     predict_chains: bool,
+
+    /// Enable AI Orchestration (Apotheosis Mode)
+    #[arg(long, global = true)]
+    auto: bool,
+
+    /// Ollama API URL (default: http://localhost:11434)
+    #[arg(long, global = true, default_value = "http://localhost:11434")]
+    ollama: String,
+
+    /// AI Model for reasoning (default: llama3)
+    #[arg(long, global = true, default_value = "llama3")]
+    model: String,
 }
 
 #[derive(Subcommand)]
@@ -166,7 +181,15 @@ async fn main() -> Result<()> {
     if let Some(proxy) = cli.proxy {
         engine.set_proxy(proxy);
     }
+    engine.set_timeout(cli.timeout);
     engine.set_predict_chains(cli.predict_chains);
+
+    let target = match &cli.command {
+        Commands::Full { target, .. } => target.clone(),
+        Commands::Web { url, .. } => url.clone(),
+        Commands::Rf { .. } => "RF_INTERFACE".to_string(),
+        Commands::Adversarial { target, .. } => target.clone(),
+    };
 
     match cli.command {
         Commands::Full { target, rf, hypervisor, cloud, ai, stealth } => {
@@ -229,6 +252,13 @@ async fn main() -> Result<()> {
 
             engine.scan_target(&target).await?;
         }
+    }
+
+    if cli.auto {
+        status("🧠", "Engaging Apotheosis AI Orchestration...");
+        let analyzer = crate::modules::ai_analysis::AIAnalyzer::new(cli.ollama, cli.model);
+        let orchestrator = crate::core::orchestrator::Orchestrator::new(analyzer, engine.get_report());
+        orchestrator.run_reasoning_loop(&target).await?;
     }
 
     if !cli.quiet {

@@ -2,15 +2,16 @@
 
 use crate::core::manifold::VulnerabilityManifold;
 use crate::core::policy::PolicyNetwork;
-use crate::error::{Result, BlackWraithError};
+use crate::error::Result;
 use crate::modules::*;
 use crate::output::ScanReport;
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::{Semaphore, Mutex};
 use crate::core::proxy::ProxyManager;
-use tokio::sync::Semaphore;
+use std::time::Duration;
 
 pub struct ScannerEngine {
     // Core state
@@ -30,10 +31,13 @@ pub struct ScannerEngine {
 
     // Output
     output_path: Option<PathBuf>,
-    report: ScanReport,
+    report: Arc<Mutex<ScanReport>>,
+    default_timeout: Duration,
+    ollama_url: Option<String>,
+    ollama_model: Option<String>,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum Module {
     // Layer 1–7 basic
     Arp, Syn, Service, Dns,
@@ -68,7 +72,10 @@ impl ScannerEngine {
             proxy_manager: ProxyManager::new(None),
             predict_chains: false,
             output_path: None,
-            report: ScanReport::new(),
+            report: Arc::new(Mutex::new(ScanReport::new())),
+            default_timeout: std::time::Duration::from_millis(3000),
+            ollama_url: None,
+            ollama_model: None,
         }
     }
 
@@ -133,6 +140,18 @@ impl ScannerEngine {
     pub fn set_bezier_resolution(&mut self, res: usize) { self.bezier_res = res; }
     pub fn set_proxy(&mut self, proxy_url: String) { self.proxy_manager = ProxyManager::new(Some(proxy_url)); }
     pub fn set_predict_chains(&mut self, enabled: bool) { self.predict_chains = enabled; }
+    pub fn set_timeout(&mut self, millis: u64) {
+        self.default_timeout = Duration::from_millis(millis);
+    }
+
+    pub fn set_ollama(&mut self, url: String, model: String) {
+        self.ollama_url = Some(url);
+        self.ollama_model = Some(model);
+    }
+
+    pub fn get_report(&self) -> Arc<Mutex<ScanReport>> {
+        self.report.clone()
+    }
 
     // --- Scan entry points ---
     pub async fn scan_target(&mut self, target: &str) -> Result<()> {
@@ -148,18 +167,19 @@ impl ScannerEngine {
         eprintln!("  \x1b[36m⟐\x1b[0m  Scanning \x1b[1;37m{}\x1b[0m ...", target);
         let mut tasks = FuturesUnordered::new();
 
-        for &module in &self.modules {
+        for module in self.modules.clone() {
             let permit = self.semaphore.clone().acquire_owned().await?;
             let ip = target;
-            let rf_iface = self.rf_interface.clone();
-            let bezier_res = self.bezier_res;
-
+            let _rf_iface = self.rf_interface.clone();
+            let _bezier_res = self.bezier_res;
+            let timeout = self.default_timeout;
             let proxy = self.proxy_manager.clone();
+
             tasks.push(tokio::spawn(async move {
                 let _permit = permit;
                 match module {
                     Module::Arp => arp::arp_scan(ip).await.map(|o| ModuleOutput::Arp(o)),
-                    Module::Syn => syn::syn_scan(ip, &proxy).await.map(|o| ModuleOutput::Syn(o)),
+                    Module::Syn => syn::syn_scan(ip, &proxy, timeout).await.map(|o| ModuleOutput::Syn(o)),
                     Module::Service => service::fingerprint_services(ip, &proxy).await.map(|o| ModuleOutput::Service(o)),
                     Module::Dns => dns::dns_harvest(&ip.to_string()).await.map(|o| ModuleOutput::Dns(o)),
                     #[cfg(feature = "l1_rf")]
@@ -167,7 +187,7 @@ impl ScannerEngine {
                         if let Some(iface) = rf_iface {
                             l1_rf::scan_rf_fingerprint(&iface, bezier_res).await.map(|o| ModuleOutput::Rf(o))
                         } else {
-                            Err(BlackWraithError::Rf("No interface specified".into()))
+                            Err(Result::from(crate::error::BlackWraithError::Rf("No interface specified".into())).unwrap_err())
                         }
                     }
                     #[cfg(feature = "hypervisor")]
@@ -191,21 +211,26 @@ impl ScannerEngine {
 
         while let Some(result) = tasks.next().await {
             match result {
-                Ok(Ok(output)) => self.report.merge(output),
+                Ok(Ok(output)) => {
+                    let mut report = self.report.lock().await;
+                    report.merge(output);
+                },
                 Ok(Err(e)) => eprintln!("  \x1b[31m✗\x1b[0m  Module error: {}", e),
                 Err(e) => eprintln!("  \x1b[31m✗\x1b[0m  Task panic: {}", e),
             }
         }
 
         // Update manifold with new findings
-        self.manifold.update(&self.report);
+        let report_guard = self.report.lock().await;
+        self.manifold.update(&report_guard);
         Ok(())
     }
 
     #[cfg(feature = "l7_web")]
     pub async fn scan_url(&mut self, url: &str) -> Result<()> {
         let output = l7_web::full_web_assessment(url, &self.proxy_manager).await?;
-        self.report.merge(ModuleOutput::Web(output));
+        let mut report = self.report.lock().await;
+        report.merge(ModuleOutput::Web(output));
         Ok(())
     }
 
@@ -219,7 +244,8 @@ impl ScannerEngine {
     pub async fn scan_rf(&mut self) -> Result<()> {
         if let Some(iface) = &self.rf_interface {
             let output = l1_rf::scan_rf_fingerprint(iface, self.bezier_res).await?;
-            self.report.merge(ModuleOutput::Rf(output));
+            let mut report = self.report.lock().await;
+            report.merge(ModuleOutput::Rf(output));
             Ok(())
         } else {
             Err(BlackWraithError::Rf("No interface".into()))
@@ -233,17 +259,22 @@ impl ScannerEngine {
     }
 
     pub async fn finalize(&mut self) -> Result<()> {
+        let mut report = self.report.lock().await;
+
+        // Refresh manifold to include any AI-sourced techniques
+        self.manifold.update(&report);
+
         // Compute exploitability geodesics
         let curvature = self.manifold.compute_curvature();
-        self.report.manifold_curvature = Some(curvature);
+        report.manifold_curvature = Some(curvature);
 
         // Generate ATT&CK chains
         if self.predict_chains {
-            let chains = self.policy.suggest_chains(&self.report);
-            self.report.campaign_attribution = chains;
+            let chains = self.policy.suggest_chains(&report);
+            report.campaign_attribution = chains;
         }
 
-        let json = serde_json::to_string_pretty(&self.report)?;
+        let json = serde_json::to_string_pretty(&*report)?;
         if let Some(path) = &self.output_path {
             tokio::fs::write(path, json).await?;
         } else {

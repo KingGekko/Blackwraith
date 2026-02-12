@@ -4,10 +4,9 @@
 use crate::error::Result;
 use crate::core::proxy::ProxyManager;
 use serde::{Serialize, Deserialize};
-use reqwest::{Client, ClientBuilder};
+use reqwest::Client;
 use select::document::Document;
 use select::predicate::Name;
-use std::time::Duration;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WebVulnerabilityReport {

@@ -1,5 +1,4 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_socks::tcp::Socks5Stream;
 use crate::error::{Result, BlackWraithError};

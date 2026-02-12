@@ -30,6 +30,14 @@ pub struct ScanReport {
     pub web_expert: Option<adversarial::web_expert::WebExpertReport>,
     pub extreme: Option<adversarial::extreme_exploitation::ExtremeExploitationReport>,
     pub evasion: Option<evasion::EvasionCapabilities>,
+    pub ai_findings: Vec<AIFinding>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AIFinding {
+    pub tool: String,
+    pub assessment: String,
+    pub timestamp: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,7 +77,17 @@ impl ScanReport {
             web_expert: None,
             extreme: None,
             evasion: None,
+            ai_findings: Vec::new(),
         }
+    }
+
+    pub fn add_ai_finding(&mut self, tool: &str, assessment: &str, techniques: Vec<Technique>) {
+        self.ai_findings.push(AIFinding {
+            tool: tool.to_string(),
+            assessment: assessment.to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        });
+        self.techniques.extend(techniques);
     }
 
     pub fn merge(&mut self, output: ModuleOutput) {
